@@ -97,6 +97,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                     .read()
                     .format("jdbc")
                     .option("url", this.getJdbcURL())
+                    .option("partitionColumn", callingMigration.getPartitionColumn())
         } else {
             session.read().jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
         }
