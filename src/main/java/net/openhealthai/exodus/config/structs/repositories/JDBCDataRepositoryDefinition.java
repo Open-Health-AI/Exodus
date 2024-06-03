@@ -6,7 +6,10 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 
+import java.sql.*;
+import java.text.SimpleDateFormat;
 import java.util.Properties;
+import java.util.UUID;
 
 public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition implements ResourceConstrainedDataRepository {
     private String driverClass;
@@ -93,15 +96,72 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
         }
         if (parallelism > 1) {
             // Do a partitioned read
-            session
-                    .read()
-                    .format("jdbc")
-                    .option("url", this.getJdbcURL())
-                    .option("partitionColumn", callingMigration.getPartitionColumn())
+            // - First determine lower and upper bound
+            int type = -1;
+            Object lower = null;
+            Object upper = null;
+            try (Connection conn = DriverManager.getConnection(this.getJdbcURL(), this.getJdbcUsername(), this.getJdbcPassword())) {
+                String query = "SELECT MIN(" + callingMigration.getPartitionColumn() + ") AS idx_min,  MAX(" + callingMigration.getPartitionColumn() + ") AS idx_max,  FROM " + table + " exodus_read_" + UUID.randomUUID().toString().replaceAll("-", "");
+                PreparedStatement ps = conn.prepareStatement(query);
+                ResultSetMetaData queryMeta = ps.getMetaData();
+                type = queryMeta.getColumnType(1);
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    lower = rs.getObject("idx_min");
+                    upper = rs.getObject("idx_max");
+                }
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
+            // - Now define read itself using typecasts
+            SimpleDateFormat dateSDF = new SimpleDateFormat("yyyy-MM-dd");
+            SimpleDateFormat timestampSDF = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            switch (type) {
+                case Types.SMALLINT:
+                    return session
+                            .read()
+                            .option("url", this.getJdbcURL())
+                            .option("partitionColumn", callingMigration.getPartitionColumn())
+                            .option("lowerBound", (Short) lower)
+                            .option("upperBound", (Short) upper)
+                            .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                case Types.INTEGER:
+                    return session
+                            .read()
+                            .option("url", this.getJdbcURL())
+                            .option("partitionColumn", callingMigration.getPartitionColumn())
+                            .option("lowerBound", (Integer) lower)
+                            .option("upperBound", (Integer) upper)
+                            .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                case Types.BIGINT:
+                    return session
+                            .read()
+                            .option("url", this.getJdbcURL())
+                            .option("partitionColumn", callingMigration.getPartitionColumn())
+                            .option("lowerBound", (Long) lower)
+                            .option("upperBound", (Long) upper)
+                            .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                case Types.DATE:
+                    return session
+                            .read()
+                            .option("url", this.getJdbcURL())
+                            .option("partitionColumn", callingMigration.getPartitionColumn())
+                            .option("lowerBound", dateSDF.format((java.sql.Date) lower))
+                            .option("upperBound", dateSDF.format((java.sql.Date) upper))
+                            .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                case Types.TIMESTAMP:
+                    return session.read()
+                            .option("url", this.getJdbcURL())
+                            .option("partitionColumn", callingMigration.getPartitionColumn())
+                            .option("lowerBound", timestampSDF.format((java.sql.Timestamp) lower))
+                            .option("upperBound", timestampSDF.format((java.sql.Timestamp) upper))
+                            .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                default:
+                    throw new UnsupportedOperationException("Column $1 is of an unsupported type for partitioning".replace("$1", callingMigration.getPartitionColumn()));
+            }
         } else {
-            session.read().jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+            return session.read().jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
         }
-        return null;
     }
 
     @Override
