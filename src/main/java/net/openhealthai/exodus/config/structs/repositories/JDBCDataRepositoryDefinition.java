@@ -187,10 +187,25 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
 
     @Override
     public void write(SparkSession session, ExodusConfiguration config, Dataset<Row> data, DataMigrationDefinition callingMigration) {
+        // First, figure out how to partition/parallelism level
+        int parallelism = Math.max(callingMigration.getMaxWriteConnections(), this.maxWriteConnections);
+        if (parallelism == -1) {
+            parallelism = session.leafNodeDefaultParallelism(); // Silently default to max if no limits specified
+        } else if (callingMigration.getMaxReadConnections() > this.maxWriteConnections && this.maxWriteConnections > 0) {
+            parallelism = this.maxWriteConnections;
+            session.logWarning(() -> (
+                    "[Exodus Migration $1 - JDBC Write]: $2 write connection limit $3 greater than data repository $4 " +
+                            "defined max concurrent connection limit of $5. Using parallelism of $5"
+            ).replace("$1", callingMigration.getIdentifier()
+            ).replace("$2", callingMigration.getSourcePath()
+            ).replace("$3", callingMigration.getMaxReadConnections() + ""
+            ).replace("4", callingMigration.getSourceRepositoryId()
+            ).replace("$5", this.maxReadConnections + ""));
+        }
         Properties connectionInfo = new Properties();
         connectionInfo.setProperty("user", this.getJdbcUsername());
         connectionInfo.setProperty("password", this.getJdbcPassword());
-        data.write().option("batchsize", "10000").option("isolationLevel", "NONE").mode(SaveMode.Append).jdbc(
+        data.repartition(parallelism).write().option("batchsize", "10000").option("isolationLevel", "NONE").mode(SaveMode.Append).jdbc(
                 this.getJdbcURL(),
                 callingMigration.getTargetPath(),
                 connectionInfo
