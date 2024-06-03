@@ -14,7 +14,6 @@ import java.util.Properties;
 import java.util.UUID;
 
 public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition implements ResourceConstrainedDataRepository {
-    private String driverClass;
     private String jdbcURL;
     private String jdbcUsername;
     private String jdbcPassword;
@@ -23,14 +22,6 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
     private String tempSchemaForAtomicReplacement;
     private int maxReadConnections = -1;
     private int maxWriteConnections = -1;
-
-    public String getDriverClass() {
-        return driverClass;
-    }
-
-    public void setDriverClass(String driverClass) {
-        this.driverClass = driverClass;
-    }
 
     public String getJdbcURL() {
         return jdbcURL;
