@@ -4,6 +4,7 @@ package net.openhealthai.exodus.config.structs;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import net.openhealthai.exodus.config.ExodusConfiguration;
 import net.openhealthai.exodus.config.structs.repositories.JDBCDataRepositoryDefinition;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
@@ -30,8 +31,8 @@ public abstract class DataRepositoryDefinition {
         this.type = type;
     }
 
-    public abstract Dataset<Row> read(SparkSession session, DataMigrationDefinition callingMigration);
+    public abstract Dataset<Row> read(SparkSession session, ExodusConfiguration config, DataMigrationDefinition callingMigration);
 
-    public abstract void write(SparkSession session, Dataset<Row> data, DataMigrationDefinition callingMigration);
+    public abstract void write(SparkSession session, ExodusConfiguration config, Dataset<Row> data, DataMigrationDefinition callingMigration);
 }
 

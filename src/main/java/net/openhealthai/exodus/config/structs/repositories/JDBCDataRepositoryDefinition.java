@@ -1,9 +1,11 @@
 package net.openhealthai.exodus.config.structs.repositories;
 
+import net.openhealthai.exodus.config.ExodusConfiguration;
 import net.openhealthai.exodus.config.structs.DataMigrationDefinition;
 import net.openhealthai.exodus.config.structs.DataRepositoryDefinition;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SaveMode;
 import org.apache.spark.sql.SparkSession;
 
 import java.sql.*;
@@ -16,6 +18,9 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
     private String jdbcURL;
     private String jdbcUsername;
     private String jdbcPassword;
+
+    private boolean atomicReplacement = false;
+    private String tempSchemaForAtomicReplacement;
     private int maxReadConnections = -1;
     private int maxWriteConnections = -1;
 
@@ -67,8 +72,24 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
         this.maxWriteConnections = maxWriteConnections;
     }
 
+    public boolean isAtomicReplacement() {
+        return atomicReplacement;
+    }
+
+    public void setAtomicReplacement(boolean atomicReplacement) {
+        this.atomicReplacement = atomicReplacement;
+    }
+
+    public String getTempSchemaForAtomicReplacement() {
+        return tempSchemaForAtomicReplacement;
+    }
+
+    public void setTempSchemaForAtomicReplacement(String tempSchemaForAtomicReplacement) {
+        this.tempSchemaForAtomicReplacement = tempSchemaForAtomicReplacement;
+    }
+
     @Override
-    public Dataset<Row> read(SparkSession session, DataMigrationDefinition callingMigration) {
+    public Dataset<Row> read(SparkSession session, ExodusConfiguration config, DataMigrationDefinition callingMigration) {
         Properties connectionInfo = new Properties();
         connectionInfo.setProperty("user", this.getJdbcUsername());
         connectionInfo.setProperty("password", this.getJdbcPassword());
@@ -101,7 +122,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
             Object lower = null;
             Object upper = null;
             try (Connection conn = DriverManager.getConnection(this.getJdbcURL(), this.getJdbcUsername(), this.getJdbcPassword())) {
-                String query = "SELECT MIN(" + callingMigration.getPartitionColumn() + ") AS idx_min,  MAX(" + callingMigration.getPartitionColumn() + ") AS idx_max,  FROM " + table + " exodus_read_" + UUID.randomUUID().toString().replaceAll("-", "");
+                String query = "SELECT MIN(" + callingMigration.getPartitionColumn() + ") AS idx_min,  MAX(" + callingMigration.getPartitionColumn() + ") AS idx_max,  FROM " + table + " exodus_read_" + UUID.randomUUID().toString().replaceAll("-", ""); // TODO implement checkpointing
                 PreparedStatement ps = conn.prepareStatement(query);
                 ResultSetMetaData queryMeta = ps.getMetaData();
                 type = queryMeta.getColumnType(1);
@@ -165,7 +186,14 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
     }
 
     @Override
-    public void write(SparkSession session, Dataset<Row> data, DataMigrationDefinition callingMigration) {
-
+    public void write(SparkSession session, ExodusConfiguration config, Dataset<Row> data, DataMigrationDefinition callingMigration) {
+        Properties connectionInfo = new Properties();
+        connectionInfo.setProperty("user", this.getJdbcUsername());
+        connectionInfo.setProperty("password", this.getJdbcPassword());
+        data.write().option("batchsize", "10000").option("isolationLevel", "NONE").mode(SaveMode.Append).jdbc(
+                this.getJdbcURL(),
+                callingMigration.getTargetPath(),
+                connectionInfo
+        );
     }
 }

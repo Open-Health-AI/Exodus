@@ -23,7 +23,7 @@ public class Exodus {
         ExodusConfiguration config = om.readValue(new File(args[0]), ExodusConfiguration.class);
         // Initialize Spark
         Date currDate = new Date(); // Timestamp for App name
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddhhmmss");
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmmss");
         SparkSession session = SparkSession.builder().appName("Exodus-" + sdf.format(currDate)).getOrCreate();
         // Generate an execution plan TODO no config validation yet.
         // TODO for now this is done in serial which is not optimal if we are not at max parallelism for every migration
@@ -36,9 +36,8 @@ public class Exodus {
 
     private static void executeMigration(SparkSession session, DataMigrationDefinition migration, ExodusConfiguration config) {
         session.sparkContext().setJobGroup("Exodus: " + migration.getIdentifier(), "Data Migration for Step " + migration.getIdentifier(), false);
-
-        Dataset<Row> in  = config.getRepositories().get(migration.getSourceRepositoryId()).read(session, migration);
-        config.getRepositories().get(migration.getTargetRepositoryId()).write(session, in, migration);
+        Dataset<Row> in  = config.getRepositories().get(migration.getSourceRepositoryId()).read(session, config, migration);
+        config.getRepositories().get(migration.getTargetRepositoryId()).write(session, config, in, migration);
         session.sparkContext().clearJobGroup();
     }
 }
