@@ -24,14 +24,14 @@ public class Exodus {
         // Initialize Spark
         Date currDate = new Date(); // Timestamp for App name
         SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmmss");
-        SparkSession session = SparkSession.builder().appName("Exodus-" + sdf.format(currDate)).getOrCreate();
+        SparkSession session = SparkSession.builder().appName("Exodus-" + sdf.format(currDate))
+                .getOrCreate();
         // Generate an execution plan TODO no config validation yet.
         // TODO for now this is done in serial which is not optimal if we are not at max parallelism for every migration
         List<DataMigrationDefinition> migrations = config.getMigrations();
         for (DataMigrationDefinition migration : migrations) {
             executeMigration(session, migration, config);
         }
-
     }
 
     private static void executeMigration(SparkSession session, DataMigrationDefinition migration, ExodusConfiguration config) {

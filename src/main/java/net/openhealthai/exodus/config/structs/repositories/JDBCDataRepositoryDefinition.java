@@ -8,6 +8,7 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SaveMode;
 import org.apache.spark.sql.SparkSession;
 
+import java.math.BigDecimal;
 import java.sql.*;
 import java.text.SimpleDateFormat;
 import java.util.Properties;
@@ -113,7 +114,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
             Object lower = null;
             Object upper = null;
             try (Connection conn = DriverManager.getConnection(this.getJdbcURL(), this.getJdbcUsername(), this.getJdbcPassword())) {
-                String query = "SELECT MIN(" + callingMigration.getPartitionColumn() + ") AS idx_min,  MAX(" + callingMigration.getPartitionColumn() + ") AS idx_max,  FROM " + table + " exodus_read_" + UUID.randomUUID().toString().replaceAll("-", ""); // TODO implement checkpointing
+                String query = "SELECT MIN(" + callingMigration.getPartitionColumn() + ") AS idx_min,  MAX(" + callingMigration.getPartitionColumn() + ") AS idx_max FROM " + table + " exodus_read_" + UUID.randomUUID().toString().replaceAll("-", ""); // TODO implement checkpointing
                 PreparedStatement ps = conn.prepareStatement(query);
                 ResultSetMetaData queryMeta = ps.getMetaData();
                 type = queryMeta.getColumnType(1);
@@ -133,6 +134,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                     return session
                             .read()
                             .option("url", this.getJdbcURL())
+                            .option("numPartitions", parallelism)
                             .option("partitionColumn", callingMigration.getPartitionColumn())
                             .option("lowerBound", (Short) lower)
                             .option("upperBound", (Short) upper)
@@ -141,6 +143,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                     return session
                             .read()
                             .option("url", this.getJdbcURL())
+                            .option("numPartitions", parallelism)
                             .option("partitionColumn", callingMigration.getPartitionColumn())
                             .option("lowerBound", (Integer) lower)
                             .option("upperBound", (Integer) upper)
@@ -149,14 +152,33 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                     return session
                             .read()
                             .option("url", this.getJdbcURL())
+                            .option("numPartitions", parallelism)
                             .option("partitionColumn", callingMigration.getPartitionColumn())
                             .option("lowerBound", (Long) lower)
                             .option("upperBound", (Long) upper)
+                            .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                case Types.DECIMAL:
+                    return session.read()
+                            .option("url", this.getJdbcURL())
+                            .option("numPartitions", parallelism)
+                            .option("partitionColumn", callingMigration.getPartitionColumn())
+                            .option("lowerBound", ((BigDecimal) lower).longValue())
+                            .option("upperBound", ((BigDecimal) upper).longValue())
+                            .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                case Types.NUMERIC:
+                    return session
+                            .read()
+                            .option("url", this.getJdbcURL())
+                            .option("numPartitions", parallelism)
+                            .option("partitionColumn", callingMigration.getPartitionColumn())
+                            .option("lowerBound", ((Number) lower).longValue())
+                            .option("upperBound", ((Number) upper).longValue())
                             .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
                 case Types.DATE:
                     return session
                             .read()
                             .option("url", this.getJdbcURL())
+                            .option("numPartitions", parallelism)
                             .option("partitionColumn", callingMigration.getPartitionColumn())
                             .option("lowerBound", dateSDF.format((java.sql.Date) lower))
                             .option("upperBound", dateSDF.format((java.sql.Date) upper))
@@ -164,6 +186,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                 case Types.TIMESTAMP:
                     return session.read()
                             .option("url", this.getJdbcURL())
+                            .option("numPartitions", parallelism)
                             .option("partitionColumn", callingMigration.getPartitionColumn())
                             .option("lowerBound", timestampSDF.format((java.sql.Timestamp) lower))
                             .option("upperBound", timestampSDF.format((java.sql.Timestamp) upper))
@@ -196,7 +219,11 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
         Properties connectionInfo = new Properties();
         connectionInfo.setProperty("user", this.getJdbcUsername());
         connectionInfo.setProperty("password", this.getJdbcPassword());
-        data.repartition(parallelism).write().option("batchsize", "10000").option("isolationLevel", "NONE").mode(SaveMode.Append).jdbc(
+        data.repartition(parallelism).write()
+                .option("compression", "snappy")
+                .option("batchsize", "50000")
+                .option("isolationLevel", "NONE")
+                .mode(SaveMode.Append).jdbc(
                 this.getJdbcURL(),
                 callingMigration.getTargetPath(),
                 connectionInfo
