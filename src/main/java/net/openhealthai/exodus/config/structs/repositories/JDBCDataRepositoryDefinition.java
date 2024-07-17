@@ -1,6 +1,7 @@
 package net.openhealthai.exodus.config.structs.repositories;
 
 import net.openhealthai.exodus.config.ExodusConfiguration;
+import net.openhealthai.exodus.config.structs.DataCheckpointingStrategy;
 import net.openhealthai.exodus.config.structs.DataMigrationDefinition;
 import net.openhealthai.exodus.config.structs.DataRepositoryDefinition;
 import org.apache.spark.sql.Dataset;
@@ -11,6 +12,8 @@ import org.apache.spark.sql.SparkSession;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
 
@@ -103,18 +106,44 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                 ).replace("$1", callingMigration.getIdentifier()
                 ).replace("$2", callingMigration.getSourcePath()
                 ).replace("$3", callingMigration.getMaxReadConnections() + ""
-                ).replace("4", callingMigration.getSourceRepositoryId()
+                ).replace("$4", callingMigration.getSourceRepositoryId()
                 ).replace("$5", this.maxReadConnections + ""));
             }
         }
         if (parallelism > 1) {
             // Do a partitioned read
-            // - First determine lower and upper bound
+            String checkpointSuffix = "";
+            List<Object> params = new ArrayList<>();
+            // - Adjust query for checkpointing if necessary
+            if (callingMigration.getCheckpointed() && callingMigration.getCheckpointingStrategy().isPreDatafetchFilterStrategy()) {
+                // - Get current param values
+                try (Connection conn = DriverManager.getConnection(config.getPersistence().getJdbcURL(), config.getPersistence().getJdbcUsername(), config.getPersistence().getJdbcPassword())) {
+
+                } catch (SQLException e) {
+                    throw new RuntimeException("Error communicating with application persistence store", e);
+                }
+                StringBuilder suffixBuilder = new StringBuilder(" WHERE ");
+                boolean initFlag = false;
+                for (String column : callingMigration.getCheckpointColumns()) {
+                    if (!initFlag) {
+                        initFlag = true;
+                    } else {
+                        suffixBuilder.append("AND ");
+                    }
+                    suffixBuilder.append(column).append(" ");
+                    if (callingMigration.getCheckpointingStrategy().equals(DataCheckpointingStrategy.MAX_VALUE)) { // Only MIN/MAX Value checkpoint strategies do this filtering
+                        suffixBuilder.append("> ? ");
+                    } else {
+                        suffixBuilder.append("< ? ");
+                    }
+                }
+            }
             int type = -1;
             Object lower = null;
             Object upper = null;
+            // - Determine lower and upper bound
             try (Connection conn = DriverManager.getConnection(this.getJdbcURL(), this.getJdbcUsername(), this.getJdbcPassword())) {
-                String query = "SELECT MIN(" + callingMigration.getPartitionColumn() + ") AS idx_min,  MAX(" + callingMigration.getPartitionColumn() + ") AS idx_max FROM " + table + " exodus_read_" + UUID.randomUUID().toString().replaceAll("-", ""); // TODO implement checkpointing
+                String query = "SELECT MIN(" + callingMigration.getPartitionColumn() + ") AS idx_min,  MAX(" + callingMigration.getPartitionColumn() + ") AS idx_max FROM " + table + " exodus_read_" + UUID.randomUUID().toString().replaceAll("-", "") + checkpointSuffix; // TODO implement checkpointing
                 PreparedStatement ps = conn.prepareStatement(query);
                 ResultSetMetaData queryMeta = ps.getMetaData();
                 type = queryMeta.getColumnType(1);

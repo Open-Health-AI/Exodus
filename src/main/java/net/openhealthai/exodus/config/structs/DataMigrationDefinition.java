@@ -16,7 +16,8 @@ public class DataMigrationDefinition {
     private String sourcePath;
     private String targetPath;
     private Boolean checkpointed;
-    private String checkpointColumn;
+    private List<String> checkpointColumn;
+    private DataCheckpointingStrategy checkpointingStrategy;
     private Integer maxReadConnections = -1;
     private Integer maxWriteConnections = -1;
     private Integer writeBatchSizeRows = 10_000;
@@ -78,12 +79,20 @@ public class DataMigrationDefinition {
         this.checkpointed = checkpointed;
     }
 
-    public String getCheckpointColumn() {
+    public List<String> getCheckpointColumns() {
         return checkpointColumn;
     }
 
-    public void setCheckpointColumn(String checkpointColumn) {
+    public void setCheckpointColumns(List<String> checkpointColumn) {
         this.checkpointColumn = checkpointColumn;
+    }
+
+    public DataCheckpointingStrategy getCheckpointingStrategy() {
+        return checkpointingStrategy;
+    }
+
+    public void setCheckpointingStrategy(DataCheckpointingStrategy checkpointingStrategy) {
+        this.checkpointingStrategy = checkpointingStrategy;
     }
 
     public Integer getMaxReadConnections() {
