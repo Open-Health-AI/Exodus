@@ -1,5 +1,6 @@
 package net.openhealthai.exodus.config.structs.repositories;
 
+import net.openhealthai.exodus.PersistenceUtil;
 import net.openhealthai.exodus.config.ExodusConfiguration;
 import net.openhealthai.exodus.config.structs.DataCheckpointingStrategy;
 import net.openhealthai.exodus.config.structs.DataMigrationDefinition;
@@ -12,7 +13,6 @@ import org.apache.spark.sql.SparkSession;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
@@ -85,6 +85,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
 
     @Override
     public Dataset<Row> read(SparkSession session, ExodusConfiguration config, DataMigrationDefinition callingMigration) {
+        PersistenceUtil persistence = new PersistenceUtil(config);
         Properties connectionInfo = new Properties();
         connectionInfo.setProperty("user", this.getJdbcUsername());
         connectionInfo.setProperty("password", this.getJdbcPassword());
@@ -113,29 +114,27 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
         if (parallelism > 1) {
             // Do a partitioned read
             String checkpointSuffix = "";
-            List<Object> params = new ArrayList<>();
+            List<Object> params = persistence.getCheckpointThresholds(callingMigration);
             // - Adjust query for checkpointing if necessary
-            if (callingMigration.getCheckpointed() && callingMigration.getCheckpointingStrategy().isPreDatafetchFilterStrategy()) {
+            if (callingMigration.isCheckpointed() && callingMigration.getCheckpointingStrategy().isPreDatafetchFilterStrategy()) {
                 // - Get current param values
-                try (Connection conn = DriverManager.getConnection(config.getPersistence().getJdbcURL(), config.getPersistence().getJdbcUsername(), config.getPersistence().getJdbcPassword())) {
-
-                } catch (SQLException e) {
-                    throw new RuntimeException("Error communicating with application persistence store", e);
-                }
-                StringBuilder suffixBuilder = new StringBuilder(" WHERE ");
-                boolean initFlag = false;
-                for (String column : callingMigration.getCheckpointColumns()) {
-                    if (!initFlag) {
-                        initFlag = true;
-                    } else {
-                        suffixBuilder.append("AND ");
+                if (!params.isEmpty()) {
+                    StringBuilder suffixBuilder = new StringBuilder(" WHERE ");
+                    boolean initFlag = false;
+                    for (String column : callingMigration.getCheckpointColumns()) {
+                        if (!initFlag) {
+                            initFlag = true;
+                        } else {
+                            suffixBuilder.append("AND ");
+                        }
+                        suffixBuilder.append(column).append(" ");
+                        if (callingMigration.getCheckpointingStrategy().equals(DataCheckpointingStrategy.MAX_VALUE)) { // Only MIN/MAX Value checkpoint strategies do this filtering
+                            suffixBuilder.append("> ? ");
+                        } else {
+                            suffixBuilder.append("< ? ");
+                        }
                     }
-                    suffixBuilder.append(column).append(" ");
-                    if (callingMigration.getCheckpointingStrategy().equals(DataCheckpointingStrategy.MAX_VALUE)) { // Only MIN/MAX Value checkpoint strategies do this filtering
-                        suffixBuilder.append("> ? ");
-                    } else {
-                        suffixBuilder.append("< ? ");
-                    }
+                    checkpointSuffix = suffixBuilder.toString();
                 }
             }
             int type = -1;
@@ -143,8 +142,13 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
             Object upper = null;
             // - Determine lower and upper bound
             try (Connection conn = DriverManager.getConnection(this.getJdbcURL(), this.getJdbcUsername(), this.getJdbcPassword())) {
-                String query = "SELECT MIN(" + callingMigration.getPartitionColumn() + ") AS idx_min,  MAX(" + callingMigration.getPartitionColumn() + ") AS idx_max FROM " + table + " exodus_read_" + UUID.randomUUID().toString().replaceAll("-", "") + checkpointSuffix; // TODO implement checkpointing
+                String query = "SELECT MIN(" + callingMigration.getPartitionColumn() + ") AS idx_min,  MAX(" + callingMigration.getPartitionColumn() + ") AS idx_max FROM " + table + " exodus_read_" + UUID.randomUUID().toString().replaceAll("-", "") + checkpointSuffix;
                 PreparedStatement ps = conn.prepareStatement(query);
+                if (checkpointSuffix.trim().length() > 0) {
+                    for (int i = 0; i < params.size(); i++) {
+                        ps.setObject(i + 1, params.get(i)); // SQL is 1-indexed
+                    }
+                }
                 ResultSetMetaData queryMeta = ps.getMetaData();
                 type = queryMeta.getColumnType(1);
                 ResultSet rs = ps.executeQuery();
@@ -158,9 +162,10 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
             // - Now define read itself using typecasts
             SimpleDateFormat dateSDF = new SimpleDateFormat("yyyy-MM-dd");
             SimpleDateFormat timestampSDF = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            Dataset<Row> ret = null;
             switch (type) {
                 case Types.SMALLINT:
-                    return session
+                    ret = session
                             .read()
                             .option("url", this.getJdbcURL())
                             .option("numPartitions", parallelism)
@@ -168,8 +173,9 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                             .option("lowerBound", (Short) lower)
                             .option("upperBound", (Short) upper)
                             .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                    break;
                 case Types.INTEGER:
-                    return session
+                    ret = session
                             .read()
                             .option("url", this.getJdbcURL())
                             .option("numPartitions", parallelism)
@@ -177,8 +183,9 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                             .option("lowerBound", (Integer) lower)
                             .option("upperBound", (Integer) upper)
                             .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                    break;
                 case Types.BIGINT:
-                    return session
+                    ret = session
                             .read()
                             .option("url", this.getJdbcURL())
                             .option("numPartitions", parallelism)
@@ -186,16 +193,18 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                             .option("lowerBound", (Long) lower)
                             .option("upperBound", (Long) upper)
                             .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                    break;
                 case Types.DECIMAL:
-                    return session.read()
+                    ret = session.read()
                             .option("url", this.getJdbcURL())
                             .option("numPartitions", parallelism)
                             .option("partitionColumn", callingMigration.getPartitionColumn())
                             .option("lowerBound", ((BigDecimal) lower).longValue())
                             .option("upperBound", ((BigDecimal) upper).longValue())
                             .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                    break;
                 case Types.NUMERIC:
-                    return session
+                    ret = session
                             .read()
                             .option("url", this.getJdbcURL())
                             .option("numPartitions", parallelism)
@@ -203,25 +212,33 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                             .option("lowerBound", ((Number) lower).longValue())
                             .option("upperBound", ((Number) upper).longValue())
                             .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                    break;
                 case Types.DATE:
-                    return session
+                    ret = session
                             .read()
                             .option("url", this.getJdbcURL())
                             .option("numPartitions", parallelism)
                             .option("partitionColumn", callingMigration.getPartitionColumn())
-                            .option("lowerBound", dateSDF.format((java.sql.Date) lower))
-                            .option("upperBound", dateSDF.format((java.sql.Date) upper))
+                            .option("lowerBound", dateSDF.format((Date) lower))
+                            .option("upperBound", dateSDF.format((Date) upper))
                             .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                    break;
                 case Types.TIMESTAMP:
-                    return session.read()
+                    ret = session.read()
                             .option("url", this.getJdbcURL())
                             .option("numPartitions", parallelism)
                             .option("partitionColumn", callingMigration.getPartitionColumn())
-                            .option("lowerBound", timestampSDF.format((java.sql.Timestamp) lower))
-                            .option("upperBound", timestampSDF.format((java.sql.Timestamp) upper))
+                            .option("lowerBound", timestampSDF.format((Timestamp) lower))
+                            .option("upperBound", timestampSDF.format((Timestamp) upper))
                             .jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+                    break;
                 default:
                     throw new UnsupportedOperationException("Column $1 is of an unsupported type for partitioning".replace("$1", callingMigration.getPartitionColumn()));
+            }
+            if (callingMigration.isCheckpointed() && callingMigration.getCheckpointingStrategy().equals(DataCheckpointingStrategy.KEY_VALUE_COMPARE)) {
+
+            } else {
+                return ret;
             }
         } else {
             return session.read().jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);

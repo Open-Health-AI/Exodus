@@ -71,7 +71,7 @@ public class DataMigrationDefinition {
         this.targetPath = targetPath;
     }
 
-    public Boolean getCheckpointed() {
+    public Boolean isCheckpointed() {
         return checkpointed;
     }
 
