@@ -1,6 +1,6 @@
 package net.openhealthai.exodus.config.structs.repositories;
 
-import net.openhealthai.exodus.PersistenceUtil;
+import net.openhealthai.exodus.CheckpointUtil;
 import net.openhealthai.exodus.config.ExodusConfiguration;
 import net.openhealthai.exodus.config.structs.DataCheckpointingStrategy;
 import net.openhealthai.exodus.config.structs.DataMigrationDefinition;
@@ -9,6 +9,7 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SaveMode;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.storage.StorageLevel;
 
 import java.math.BigDecimal;
 import java.sql.*;
@@ -85,7 +86,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
 
     @Override
     public Dataset<Row> read(SparkSession session, ExodusConfiguration config, DataMigrationDefinition callingMigration) {
-        PersistenceUtil persistence = new PersistenceUtil(config);
+        CheckpointUtil persistence = new CheckpointUtil(config);
         Properties connectionInfo = new Properties();
         connectionInfo.setProperty("user", this.getJdbcUsername());
         connectionInfo.setProperty("password", this.getJdbcPassword());
@@ -114,11 +115,11 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
         if (parallelism > 1) {
             // Do a partitioned read
             String checkpointSuffix = "";
-            List<Object> params = persistence.getCheckpointThresholds(callingMigration);
+            Row params = persistence.getCheckpointThresholds(session, callingMigration);
             // - Adjust query for checkpointing if necessary
             if (callingMigration.isCheckpointed() && callingMigration.getCheckpointingStrategy().isPreDatafetchFilterStrategy()) {
                 // - Get current param values
-                if (!params.isEmpty()) {
+                if (params != null) {
                     StringBuilder suffixBuilder = new StringBuilder(" WHERE ");
                     boolean initFlag = false;
                     for (String column : callingMigration.getCheckpointColumns()) {
@@ -146,7 +147,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                 PreparedStatement ps = conn.prepareStatement(query);
                 if (checkpointSuffix.trim().length() > 0) {
                     for (int i = 0; i < params.size(); i++) {
-                        ps.setObject(i + 1, params.get(i)); // SQL is 1-indexed
+                        ps.setObject(i + 1, params.get(i)); // SQL is 1-indexed TODO fix param types
                     }
                 }
                 ResultSetMetaData queryMeta = ps.getMetaData();
@@ -252,6 +253,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
 
     @Override
     public void write(SparkSession session, ExodusConfiguration config, Dataset<Row> data, DataMigrationDefinition callingMigration) {
+        CheckpointUtil checkpointing = new CheckpointUtil(config);
         // First, figure out how to partition/parallelism level
         int parallelism = Math.max(callingMigration.getMaxWriteConnections(), this.maxWriteConnections);
         if (parallelism == -1) {
@@ -267,10 +269,20 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
             ).replace("4", callingMigration.getSourceRepositoryId()
             ).replace("$5", this.maxReadConnections + ""));
         }
+        if (!callingMigration.isCheckpointed()) {
+            // Truncate before write
+            try (Connection conn =  DriverManager.getConnection(this.getJdbcURL(), this.getJdbcUsername(), this.getJdbcPassword())) {
+                conn.prepareStatement("TRUNCATE TABLE " +  callingMigration.getSourcePath()).executeUpdate();
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
+        }
         Properties connectionInfo = new Properties();
         connectionInfo.setProperty("user", this.getJdbcUsername());
         connectionInfo.setProperty("password", this.getJdbcPassword());
-        data.repartition(parallelism).write()
+        Dataset<Row> df = data.repartition(parallelism).persist(StorageLevel.MEMORY_AND_DISK_2());
+        // First write to DB
+        df.write()
                 .option("compression", "snappy")
                 .option("batchsize", "50000")
                 .option("isolationLevel", "NONE")
@@ -279,5 +291,9 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                 callingMigration.getTargetPath(),
                 connectionInfo
         );
+        // And only once this is done do we write to persistence/checkpointing if applicable
+        checkpointing.writeCheckpoint(callingMigration, df);
+        // and now unpersist
+        df.unpersist();
     }
 }

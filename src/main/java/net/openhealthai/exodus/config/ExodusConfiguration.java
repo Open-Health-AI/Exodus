@@ -1,6 +1,5 @@
 package net.openhealthai.exodus.config;
 
-import net.openhealthai.exodus.config.structs.CheckpointStatePersistence;
 import net.openhealthai.exodus.config.structs.DataMigrationDefinition;
 import net.openhealthai.exodus.config.structs.DataRepositoryDefinition;
 
@@ -17,7 +16,7 @@ public class ExodusConfiguration {
     private Map<String, DataRepositoryDefinition> repositories;
     private List<DataMigrationDefinition> migrations;
 
-    private CheckpointStatePersistence persistence;
+    private String checkpointPath;
 
     public Map<String, DataRepositoryDefinition> getRepositories() {
         return repositories;
@@ -35,11 +34,11 @@ public class ExodusConfiguration {
         this.migrations = migrations;
     }
 
-    public CheckpointStatePersistence getPersistence() {
-        return persistence;
+    public String getCheckpointPath() {
+        return checkpointPath;
     }
 
-    public void setPersistence(CheckpointStatePersistence persistence) {
-        this.persistence = persistence;
+    public void setCheckpointPath(String checkpointPath) {
+        this.checkpointPath = checkpointPath;
     }
 }
