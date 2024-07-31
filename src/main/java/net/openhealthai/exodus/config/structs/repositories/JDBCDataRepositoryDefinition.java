@@ -236,12 +236,17 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
                     throw new UnsupportedOperationException("Column $1 is of an unsupported type for partitioning".replace("$1", callingMigration.getPartitionColumn()));
             }
             if (callingMigration.isCheckpointed() && callingMigration.getCheckpointingStrategy().equals(DataCheckpointingStrategy.KEY_VALUE_COMPARE)) {
-
+                return persistence.retainNonExistingKV(callingMigration, ret, session);
             } else {
                 return ret;
             }
         } else {
-            return session.read().jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+            Dataset<Row> ret = session.read().jdbc(this.getJdbcURL(), callingMigration.getSourcePath(), connectionInfo);
+            if (callingMigration.isCheckpointed() && callingMigration.getCheckpointingStrategy().equals(DataCheckpointingStrategy.KEY_VALUE_COMPARE)) {
+                return persistence.retainNonExistingKV(callingMigration, ret, session);
+            } else {
+                return ret;
+            }
         }
     }
 
