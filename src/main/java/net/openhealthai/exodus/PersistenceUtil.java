@@ -3,12 +3,14 @@ package net.openhealthai.exodus;
 import net.openhealthai.exodus.config.ExodusConfiguration;
 import net.openhealthai.exodus.config.structs.CheckpointStatePersistence;
 import net.openhealthai.exodus.config.structs.DataMigrationDefinition;
+import org.apache.spark.sql.Column;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 
 import java.sql.*;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class PersistenceUtil {
     private final CheckpointStatePersistence persistence;
@@ -98,6 +100,7 @@ public class PersistenceUtil {
                 this.schema + "." + tableName,
                 properties
         );
-        return df.as("orig").join(filterDataset.as("filtering")).select("orig.*");
+        Column joinCondition = Arrays.stream(filterDataset.columns()).map(colName -> df.col(colName).equalTo(filterDataset.col(colName))).reduce((c1, c2) -> c1.and(c2)).orElseThrow(() -> new RuntimeException("KV Mapping Attempted with Empty Join Column Set"));
+        return df.join(filterDataset, joinCondition, "leftsemi");
     }
 }
