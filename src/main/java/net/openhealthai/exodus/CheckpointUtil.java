@@ -40,11 +40,11 @@ public class CheckpointUtil {
     }
 
     public Row getCheckpointThresholds(SparkSession spark, DataMigrationDefinition migration) {
-        if (!shouldFilter(migration)) {
+        if (!shouldFilter(migration) || !migration.getCheckpointingStrategy().isPreDatafetchFilterStrategy()) {
             return null;
         }
 
-        Row read = spark.read().parquet(this.getPersistenceTableName(migration)).first();
+        Row read = spark.read().parquet(this.persistence + "/" + this.getPersistenceTableName(migration)).first();
         return read;
     }
 
