@@ -30,7 +30,7 @@ public class CheckpointUtil {
     }
 
     private boolean shouldFilter(DataMigrationDefinition migration) {
-        if (!migration.isCheckpointed() || !migration.getCheckpointingStrategy().isPreDatafetchFilterStrategy()) {
+        if (!migration.isCheckpointed()) {
             return false;
         }
         if (!tablesExisting.contains(this.getPersistenceTableName(migration))) {

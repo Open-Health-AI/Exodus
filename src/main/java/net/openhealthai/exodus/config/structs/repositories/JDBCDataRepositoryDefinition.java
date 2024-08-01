@@ -284,7 +284,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
         // First write to DB
         df.write()
                 .option("compression", "snappy")
-                .option("batchsize", "50000")
+                .option("batchsize", "25000")
                 .option("isolationLevel", "NONE")
                 .mode(SaveMode.Append).jdbc(
                 this.getJdbcURL(),
