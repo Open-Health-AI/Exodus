@@ -280,7 +280,7 @@ public class JDBCDataRepositoryDefinition extends DataRepositoryDefinition imple
         Properties connectionInfo = new Properties();
         connectionInfo.setProperty("user", this.getJdbcUsername());
         connectionInfo.setProperty("password", this.getJdbcPassword());
-        Dataset<Row> df = data.repartition(parallelism).persist(StorageLevel.MEMORY_AND_DISK_2());
+        Dataset<Row> df = data.repartition(parallelism).persist(StorageLevel.MEMORY_AND_DISK_SER_2());
         // First write to DB
         df.write()
                 .option("compression", "snappy")
