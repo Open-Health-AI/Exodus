@@ -64,7 +64,7 @@ public class CheckpointUtil {
         String tableName = this.getPersistenceTableName(migration);
         Dataset<Row> filterDataset = spark.read().parquet(this.persistence + "/" + tableName);
         Column joinCondition = Arrays.stream(filterDataset.columns()).map(colName -> df.col(colName).equalTo(filterDataset.col(colName))).reduce(Column::and).orElseThrow(() -> new RuntimeException("KV Mapping Attempted with Empty Join Column Set"));
-        return df.join(filterDataset, joinCondition, "leftsemi");
+        return df.join(filterDataset, joinCondition, "leftanti");
     }
 
     /**
